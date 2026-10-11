@@ -106,11 +106,11 @@ namespace platform {
         if (!fs::exists(path, ec))
             return;
 
-        ::chown(path.c_str(), uid, gid);
+        [[maybe_unused]] int rc = ::chown(path.c_str(), uid, gid);
 
         if (fs::is_directory(path, ec)) {
             for (const auto& entry : fs::recursive_directory_iterator(path, fs::directory_options::skip_permission_denied, ec))
-                ::chown(entry.path().c_str(), uid, gid);
+                rc = ::chown(entry.path().c_str(), uid, gid);
         }
     #endif
     }
