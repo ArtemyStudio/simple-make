@@ -14,10 +14,11 @@ sudo cmake --install build
 ```
 *(Dependencies like `cpr` and `nlohmann/json` are fetched automatically by CMake)*
 
-On Arch/Artix, you can instead build it as a proper package from a separate directory:
+On Arch/Artix, grab `PKGBUILD` from the [latest release](https://github.com/ArtemyStudio/simple-make/releases/latest) and build it as a proper package from a separate directory:
 
 ```bash
-mkdir simple-make-pkg && cp PKGBUILD simple-make-pkg/ && cd simple-make-pkg
+mkdir simple-make-pkg && cd simple-make-pkg
+curl -LO https://github.com/ArtemyStudio/simple-make/releases/latest/download/PKGBUILD
 makepkg -si
 ```
 
