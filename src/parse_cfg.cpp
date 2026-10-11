@@ -1,4 +1,5 @@
 #include "../include/parse_cfg.hpp"
+#include "../include/platform.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -16,8 +17,7 @@ static std::string trim(const std::string& s) {
 }
 
 void load_cfg() {
-    const char* tmp = std::getenv("SUDO_USER");
-    std::string home = tmp ? std::format("/home/{}", tmp) : "/root";
+    std::string home = platform::resolve_home_dir();
 
     std::string cfg_path = std::format("{}/.config/simple-make/simple-make.conf", home);
 
@@ -59,8 +59,27 @@ void load_cfg() {
             config.install_prefix = value;
         } else if (key == "github_token") {
             config.github_token = value;
+        } else if (key == "gitlab_token") {
+            config.gitlab_token = value;
         } else if (key == "home_path") {
             config.home_path = value;
+        } else if (key == "use_system_package_manager") {
+            config.use_system_package_manager = (value == "true" || value == "1");
+        } else if (key == "auto_update_check") {
+            config.auto_update_check = (value == "true" || value == "1");
+        } else if (key == "search_providers") {
+            config.search_providers.clear();
+            size_t start = 0;
+            while (start <= value.size()) {
+                size_t comma = value.find(',', start);
+                std::string item = trim(value.substr(start, comma == std::string::npos ? std::string::npos : comma - start));
+                std::transform(item.begin(), item.end(), item.begin(), ::tolower);
+                if (!item.empty())
+                    config.search_providers.push_back(item);
+                if (comma == std::string::npos)
+                    break;
+                start = comma + 1;
+            }
         }
     }
 }

@@ -2,3 +2,7 @@ build/
 .cache/
 .clangd
 build.sh
+pkg/
+*.rpm
+*.deb
+*.pkg.tar.*
