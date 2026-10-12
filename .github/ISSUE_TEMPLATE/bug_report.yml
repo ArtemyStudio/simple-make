@@ -1,0 +1,57 @@
+name: Bug report
+description: Something went wrong while searching, building or installing
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, and what it did instead of what you expected.
+      placeholder: |
+        $ simple-make ripgrep
+        ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: simple-make version
+      description: Output of `simple-make --help | head -2`, or the commit you built.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options:
+        - Linux
+        - macOS
+        - FreeBSD / other BSD
+        - Windows
+    validations:
+      required: true
+
+  - type: input
+    id: install_prefix
+    attributes:
+      label: install_prefix
+      description: From your config, if you changed it. Leave blank for the default (`~/.local`).
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Build log
+      description: |
+        The tail of `~/.simple-make/logs/<package>.log` if the build itself failed.
+      render: text
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I ran the latest release or current `master`
+          required: true
+        - label: I checked whether the same build works by hand (clone + its own build command)
