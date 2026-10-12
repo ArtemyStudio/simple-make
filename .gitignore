@@ -7,3 +7,4 @@ pkg/
 *.deb
 *.pkg.tar.*
 PKGBUILD
+.SRCINFO
