@@ -24,6 +24,6 @@ bool download_file(std::string_view url);
 
 bool unpack(std::string path);
 
-void process_package(std::string_view package, std::size_t total_packages);
+void process_package(std::string_view package, std::size_t total_packages, bool is_update = false);
 
 std::vector<std::string> read_list(std::string_view path);

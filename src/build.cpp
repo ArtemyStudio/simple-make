@@ -84,6 +84,33 @@ static std::vector<std::string> required_tools(Builders builder) {
     }
 }
 
+static void record_installed(const std::string& prefix, const std::set<std::string>& before, std::string_view package, const std::string& log_path) {
+    std::vector<std::string> added = diff(before, snapshot_dir(prefix));
+
+    if (!fs::exists(std::format("{}/.simple-make/installed", home)))
+        fs::create_directory(std::format("{}/.simple-make/installed", home));
+
+    std::ofstream out_file(std::format("{}/.simple-make/installed/{}.list", home, package));
+    for (auto& entry : added)
+        out_file << entry << '\n';
+    out_file.close();
+
+    platform::fix_ownership(std::format("{}/.simple-make/installed", home));
+    platform::fix_ownership(std::format("{}/.simple-make/installed/{}.list", home, package));
+    platform::fix_ownership(std::format("{}/.simple-make/logs", home));
+    platform::fix_ownership(log_path);
+}
+
+static std::string path_hint_cmd(const std::string& bin_dir) {
+    std::string export_line = std::format("export PATH=\"{}:$PATH\"", bin_dir);
+
+    return std::format("for f in {} {}; do grep -qF {} \"$f\" 2>/dev/null || echo {} >> \"$f\"; done",
+        platform::shell_quote(home + "/.bashrc"),
+        platform::shell_quote(home + "/.zshrc"),
+        platform::shell_quote(bin_dir),
+        platform::shell_quote(export_line));
+}
+
 bool do_continue() {
     if (config.auto_confirm)
         return true;
@@ -130,109 +157,6 @@ bool build_pkg(std::string path, std::size_t total_packages, std::string_view pa
     if (!fs::exists(std::format("{}/.simple-make/logs", home)))
         fs::create_directory(std::format("{}/.simple-make/logs", home));
 
-    switch (builder) {
-    case Builders::Cmake:
-        if (!do_continue()) 
-            return false;
-        if (platform::is_windows)
-            cmd = std::format("cd {} && ( cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX={} && cmake --build build -j{} && cmake --install build ) > {} 2>&1", path, config.install_prefix, jobs, log_path);
-        else
-            cmd = std::format("cd {} && {{ cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX={} && cmake --build build -j{} && cmake --install build; }} > {} 2>&1", path, config.install_prefix, jobs, log_path);
-        break;
-
-    case Builders::Meson:
-        if (!do_continue())
-            return false;
-        if (platform::is_windows)
-            cmd = std::format("cd {} && ( meson setup build --prefix={} --buildtype=release && meson compile -C build -j{} && meson install -C build ) > {} 2>&1", path, config.install_prefix, jobs, log_path);
-        else
-            cmd = std::format("cd {} && {{ meson setup build --prefix={} --buildtype=release && meson compile -C build -j{} && meson install -C build; }} > {} 2>&1", path, config.install_prefix, jobs, log_path);
-        break;
-
-    case Builders::Ninja:
-        if (!do_continue())
-            return false;
-        if (platform::is_windows)
-            cmd = std::format("cd {} && ( ninja -j{} && ninja install ) > {} 2>&1", path, jobs, log_path);
-        else
-            cmd = std::format("cd {} && {{ ninja -j{} && ninja install; }} > {} 2>&1", path, jobs, log_path);
-        break;
-
-    case Builders::Make:
-        if (!do_continue())
-            return false;
-        if (platform::is_windows)
-            cmd = std::format("cd {} && ( make -j{} && make install PREFIX={} INSTALL_PREFIX={} ) > {} 2>&1", path, jobs, config.install_prefix, config.install_prefix, log_path);
-        else
-            cmd = std::format("cd {} && {{ make -j{} && make install PREFIX={} DESTDIR= INSTALL_PREFIX={}; }} > {} 2>&1", path, jobs, config.install_prefix, config.install_prefix, log_path);
-        break;
-
-    case Builders::Autotools:
-        if (!do_continue())
-            return false;
-
-        cmd = std::format("cd {} && {{ if [ -x ./autogen.sh ]; then ./autogen.sh; fi && if [ ! -f ./configure ]; then autoreconf -fi; fi && ./configure --prefix={} && make -j{} && make install; }} > {} 2>&1", path, config.install_prefix, jobs, log_path);
-        break;
-
-    case Builders::Rust:
-        if (!do_continue())
-            return false;
-
-        {
-            std::string bin_dir = config.install_prefix + "/bin";
-            if (platform::is_windows) {
-                cmd = std::format("cd {} && cargo install --path . --root {} > {} 2>&1", path, config.install_prefix, log_path);
-                locked_println("(note) add {} to your PATH to run the installed binary", bin_dir);
-            } else {
-                std::string bash_loop = "for f in " + home + "/.bashrc " + home + "/.zshrc; do grep -q '" + bin_dir + "' \"$f\" 2>/dev/null || echo 'export PATH=\"" + bin_dir + ":$PATH\"' >> \"$f\"; done";
-                cmd = std::format("cd {} && cargo install --path . --root {} > {} 2>&1 && {}", path, config.install_prefix, log_path, bash_loop);
-            }
-        }
-
-        break;
-
-    case Builders::Go:
-        if (!do_continue())
-            return false;
-        {
-            std::string bin_dir = config.install_prefix + "/bin";
-            if (platform::is_windows) {
-                cmd = std::format("cd {} && set GOBIN={}\\bin && go install -v ./... > {} 2>&1", path, config.install_prefix, log_path);
-                locked_println("(note) add {} to your PATH to run the installed binary", bin_dir);
-            } else {
-                std::string bash_loop = "for f in " + home + "/.bashrc " + home + "/.zshrc; do grep -q '" + bin_dir + "' \"$f\" 2>/dev/null || echo 'export PATH=\"" + bin_dir + ":$PATH\"' >> \"$f\"; done";
-                cmd = std::format("cd {} && GOBIN={}/bin go install -v ./... > {} 2>&1 && {}", path, config.install_prefix, log_path, bash_loop);
-            }
-        }
-        break;
-
-    case Builders::Python:
-        if (!do_continue())
-            return false;
-        cmd = std::format("cd {} && pip install --prefix={} . > {} 2>&1", path, config.install_prefix, log_path);
-        break;
-
-    case Builders::Java:
-        if (!do_continue())
-            return false;
-        {
-            std::string jar_dir = fs::exists(path + "/build.gradle") ? "build/libs" : "target";
-            std::string pkg_build = fs::exists(path + "/build.gradle") ? "./gradlew build" : "mvn package";
-            if (platform::is_windows) {
-                cmd = std::format("cd {} && {} > {} 2>&1 && for /f \"delims=\" %i in ('dir /b \"{}\\*.jar\" 2^>nul ^| findstr /v /i \"sources javadoc\"') do native-image -jar \"{}\\%i\" -o {}\\bin\\{} >> {} 2>&1",
-                    path, pkg_build, log_path, jar_dir, jar_dir, config.install_prefix, package, log_path);
-            } else {
-                cmd = std::format("cd {} && {} > {} 2>&1 && JAR=$(find {} -maxdepth 1 -name '*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' | head -1) && native-image -jar \"$JAR\" -o {}/bin/{} >> {} 2>&1",
-                    path, pkg_build, log_path, jar_dir, config.install_prefix, package, log_path);
-            }
-        }
-        break;
-
-    case Builders::Unknown:
-        locked_println("\x1b[31munknown build tool. cannot compile this repository\x1b[0m");
-        return false;
-    }
-
     std::string prefix = config.install_prefix;
 
     if (prefix.empty()) {
@@ -243,31 +167,176 @@ bool build_pkg(std::string path, std::size_t total_packages, std::string_view pa
             prefix = '/' + prefix;
         if (prefix.back() != '/')
             prefix += '/';
-
-        if (!fs::exists(prefix))
-            fs::create_directory(prefix);
     }
 
-    std::scoped_lock install_lock(install_mtx);
+    // Builds and configure steps run untrusted, repo-controlled code (CMakeLists.txt,
+    // build.rs, setup.py, Makefiles, ...), so they go through wrap_unprivileged() and
+    // land in a staging dir first. Only the final copy into the prefix needs the
+    // install lock, which keeps concurrent builds actually concurrent, and only a
+    // prefix outside the user's home needs root for that copy.
+    bool needs_staging = !platform::is_windows;
+    std::string stage_dir = needs_staging ? std::format("{}/.simple-make/stage/{}", home, package) : "";
+    std::string prefix_arg = prefix.substr(0, prefix.size() - 1);
+    std::string destdir = needs_staging ? stage_dir : "";
+    std::string direct_target = needs_staging ? stage_dir : prefix_arg;
+    bool destdir_style = false;
 
-    std::set<std::string> first = snapshot_dir(prefix);
+    if (needs_staging) {
+        fs::remove_all(stage_dir);
+        fs::create_directories(stage_dir);
+    } else if (!fs::exists(prefix)) {
+        fs::create_directories(prefix);
+    }
 
-    int status = system(cmd.c_str());
+    std::string q_path = platform::shell_quote(path);
+    std::string q_prefix = platform::shell_quote(prefix_arg);
+    std::string q_destdir = platform::shell_quote(destdir);
+    std::string q_direct = platform::shell_quote(direct_target);
+    std::string q_log = platform::shell_quote(log_path);
+
+    switch (builder) {
+    case Builders::Cmake:
+        if (!do_continue())
+            return false;
+        destdir_style = true;
+        if (platform::is_windows)
+            cmd = std::format("cd {} && ( cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX={} && cmake --build build -j{} && cmake --install build ) > {} 2>&1", q_path, q_prefix, jobs, q_log);
+        else
+            cmd = std::format("cd {} && {{ cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX={} && cmake --build build -j{} && DESTDIR={} cmake --install build; }} > {} 2>&1", q_path, q_prefix, jobs, q_destdir, q_log);
+        break;
+
+    case Builders::Meson:
+        if (!do_continue())
+            return false;
+        destdir_style = true;
+        if (platform::is_windows)
+            cmd = std::format("cd {} && ( meson setup build --prefix={} --buildtype=release && meson compile -C build -j{} && meson install -C build ) > {} 2>&1", q_path, q_prefix, jobs, q_log);
+        else
+            cmd = std::format("cd {} && {{ meson setup build --prefix={} --buildtype=release && meson compile -C build -j{} && DESTDIR={} meson install -C build; }} > {} 2>&1", q_path, q_prefix, jobs, q_destdir, q_log);
+        break;
+
+    case Builders::Ninja:
+        if (!do_continue())
+            return false;
+        destdir_style = true;
+        if (platform::is_windows)
+            cmd = std::format("cd {} && ( ninja -j{} && ninja install ) > {} 2>&1", q_path, jobs, q_log);
+        else
+            cmd = std::format("cd {} && {{ ninja -j{} && DESTDIR={} ninja install; }} > {} 2>&1", q_path, jobs, q_destdir, q_log);
+        break;
+
+    case Builders::Make:
+        if (!do_continue())
+            return false;
+        destdir_style = true;
+        if (platform::is_windows)
+            cmd = std::format("cd {} && ( make -j{} && make install PREFIX={} INSTALL_PREFIX={} ) > {} 2>&1", q_path, jobs, q_prefix, q_prefix, q_log);
+        else
+            cmd = std::format("cd {} && {{ make -j{} && make install PREFIX={} DESTDIR={} INSTALL_PREFIX={}; }} > {} 2>&1", q_path, jobs, q_prefix, q_destdir, q_prefix, q_log);
+        break;
+
+    case Builders::Autotools:
+        if (!do_continue())
+            return false;
+
+        destdir_style = true;
+        cmd = std::format("cd {} && {{ if [ -x ./autogen.sh ]; then ./autogen.sh; fi && if [ ! -f ./configure ]; then autoreconf -fi; fi && ./configure --prefix={} && make -j{} && make install DESTDIR={}; }} > {} 2>&1", q_path, q_prefix, jobs, q_destdir, q_log);
+        break;
+
+    case Builders::Rust:
+        if (!do_continue())
+            return false;
+
+        {
+            std::string bin_dir = prefix_arg + "/bin";
+            if (platform::is_windows) {
+                cmd = std::format("cd {} && cargo install --path . --root {} > {} 2>&1", q_path, q_direct, q_log);
+                locked_println("(note) add {} to your PATH to run the installed binary", bin_dir);
+            } else {
+                cmd = std::format("cd {} && cargo install --path . --root {} > {} 2>&1 && {}", q_path, q_direct, q_log, path_hint_cmd(bin_dir));
+            }
+        }
+
+        break;
+
+    case Builders::Go:
+        if (!do_continue())
+            return false;
+        {
+            std::string bin_dir = prefix_arg + "/bin";
+            if (platform::is_windows) {
+                cmd = std::format("cd {} && set \"GOBIN={}\\bin\" && go install -v ./... > {} 2>&1", q_path, direct_target, q_log);
+                locked_println("(note) add {} to your PATH to run the installed binary", bin_dir);
+            } else {
+                cmd = std::format("cd {} && GOBIN={} go install -v ./... > {} 2>&1 && {}", q_path, platform::shell_quote(direct_target + "/bin"), q_log, path_hint_cmd(bin_dir));
+            }
+        }
+        break;
+
+    case Builders::Python:
+        if (!do_continue())
+            return false;
+        cmd = std::format("cd {} && pip install --prefix={} . > {} 2>&1", q_path, q_direct, q_log);
+        break;
+
+    case Builders::Java:
+        if (!do_continue())
+            return false;
+        {
+            std::string jar_dir = fs::exists(path + "/build.gradle") ? "build/libs" : "target";
+            std::string pkg_build = fs::exists(path + "/build.gradle") ? "./gradlew build" : "mvn package";
+            if (platform::is_windows) {
+                cmd = std::format("cd {} && {} > {} 2>&1 && for /f \"delims=\" %i in ('dir /b \"{}\\*.jar\" 2^>nul ^| findstr /v /i \"sources javadoc\"') do native-image -jar \"{}\\%i\" -o {}\\bin\\{} >> {} 2>&1",
+                    q_path, pkg_build, q_log, jar_dir, jar_dir, direct_target, package, q_log);
+            } else {
+                cmd = std::format("cd {} && {} > {} 2>&1 && JAR=$(find {} -maxdepth 1 -name '*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' | head -1) && native-image -jar \"$JAR\" -o {} >> {} 2>&1",
+                    q_path, pkg_build, q_log, platform::shell_quote(jar_dir), platform::shell_quote(std::format("{}/bin/{}", direct_target, package)), q_log);
+            }
+        }
+        break;
+
+    case Builders::Unknown:
+        locked_println("\x1b[31munknown build tool. cannot compile this repository\x1b[0m");
+        return false;
+    }
+
+    if (platform::is_elevated() && !platform::can_drop_privileges()) {
+        locked_println("\x1b[33m(warning) [cannot drop privileges] package: {} -> this build will run as root. set SUDO_USER (run via sudo from a normal account) or install sudo/runuser/su so the build can run unprivileged\x1b[0m", package);
+    }
+
+    std::string wrapped_cmd = platform::wrap_unprivileged(cmd);
+    int status = 0;
+
+    if (needs_staging) {
+        status = system(wrapped_cmd.c_str());
+
+        if (status == 0) {
+            std::scoped_lock install_lock(install_mtx);
+            std::set<std::string> first = snapshot_dir(prefix);
+
+            std::string merge_source = destdir_style ? (stage_dir + prefix_arg) : stage_dir;
+            std::string merge_cmd = std::format("mkdir -p {} && cp -a {} {}",
+                platform::shell_quote(prefix_arg),
+                platform::shell_quote(merge_source + "/."),
+                platform::shell_quote(prefix_arg + "/"));
+            status = system(merge_cmd.c_str());
+
+            if (status == 0)
+                record_installed(prefix, first, package, log_path);
+        }
+
+        fs::remove_all(stage_dir);
+    } else {
+        std::scoped_lock install_lock(install_mtx);
+        std::set<std::string> first = snapshot_dir(prefix);
+
+        status = system(wrapped_cmd.c_str());
+
+        if (status == 0)
+            record_installed(prefix, first, package, log_path);
+    }
 
     if (status == 0) {
-        std::set<std::string> second = snapshot_dir(prefix);
-        std::vector<std::string> diff_ = diff(first, second);
-
-        if (!fs::exists(std::format("{}/.simple-make/installed", home)))
-            fs::create_directory(std::format("{}/.simple-make/installed", home));
-
-        std::ofstream out_file(std::format("{}/.simple-make/installed/{}.list", home, package));
-        for (auto entry : diff_)
-            out_file << entry << '\n';
-        out_file.close();
-
-        platform::fix_ownership(std::format("{}/.simple-make", home));
-
         return true;
     } else {
         std::ifstream log_in(log_path);

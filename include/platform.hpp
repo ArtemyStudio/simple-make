@@ -34,10 +34,17 @@ namespace platform {
     struct PackageManager {
         std::string name;
         std::string install_cmd;
+        std::string query_cmd;
+        bool needs_root = true;
     };
 
     std::vector<PackageManager> available_package_managers();
     bool try_install_via_package_manager(const std::string& pkg);
+    bool is_installed_via_package_manager(const std::string& pkg);
     bool tool_available(const std::string& tool);
     void enable_ansi_colors();
+
+    std::string shell_quote(const std::string& value);
+    std::string wrap_unprivileged(const std::string& cmd);
+    bool can_drop_privileges();
 }

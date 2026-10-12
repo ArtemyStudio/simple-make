@@ -60,8 +60,6 @@ namespace platform {
             CloseHandle(token);
         }
         return elevated;
-    #elif defined(__APPLE__)
-        return true;
     #else
         return geteuid() == 0;
     #endif
@@ -69,9 +67,11 @@ namespace platform {
 
     std::string default_install_prefix() {
     #if defined(_WIN32)
-        return "C:/simple-make";
+        if (const char* local_appdata = std::getenv("LOCALAPPDATA"))
+            return std::string(local_appdata) + "/simple-make";
+        return resolve_home_dir() + "/simple-make";
     #else
-        return "/usr/local";
+        return resolve_home_dir() + "/.local";
     #endif
     }
 
@@ -102,24 +102,15 @@ namespace platform {
             return;
         }
 
-        std::error_code ec;
-        if (!fs::exists(path, ec))
-            return;
-
-        [[maybe_unused]] int rc = ::chown(path.c_str(), uid, gid);
-
-        if (fs::is_directory(path, ec)) {
-            for (const auto& entry : fs::recursive_directory_iterator(path, fs::directory_options::skip_permission_denied, ec))
-                rc = ::chown(entry.path().c_str(), uid, gid);
-        }
+        [[maybe_unused]] int rc = ::lchown(path.c_str(), uid, gid);
     #endif
     }
 
     bool tool_available(const std::string& tool) {
     #if defined(_WIN32)
-        std::string cmd = std::format("where {} >nul 2>&1", tool);
+        std::string cmd = std::format("where {} >nul 2>&1", shell_quote(tool));
     #else
-        std::string cmd = std::format("command -v {} > /dev/null 2>&1", tool);
+        std::string cmd = std::format("command -v {} > /dev/null 2>&1", shell_quote(tool));
     #endif
         return std::system(cmd.c_str()) == 0;
     }
@@ -127,18 +118,18 @@ namespace platform {
     std::vector<PackageManager> available_package_managers() {
         static const std::vector<PackageManager> candidates = {
     #if defined(_WIN32)
-            {"winget", "winget install --silent --accept-package-agreements --accept-source-agreements {}"},
-            {"choco",  "choco install -y {}"},
+            {"winget", "winget install --silent --accept-package-agreements --accept-source-agreements {}", "winget list --exact -q {} > nul 2>&1", true},
+            {"choco",  "choco install -y {}", "choco list --local-only --exact {} > nul 2>&1", true},
     #elif defined(__APPLE__)
-            {"brew",   "brew install {}"},
+            {"brew",   "brew install {}", "brew list {} > /dev/null 2>&1", false},
     #elif defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__DragonFly__)
-            {"pkg",    "pkg install -y {}"},
+            {"pkg",    "pkg install -y {}", "pkg info {} > /dev/null 2>&1", true},
     #else
-            {"apt-get", "apt-get install -y {}"},
-            {"dnf",     "dnf install -y {}"},
-            {"pacman",  "pacman -S --noconfirm {}"},
-            {"zypper",  "zypper install -y {}"},
-            {"apk",     "apk add {}"},
+            {"apt-get", "apt-get install -y {}", "dpkg -s {} > /dev/null 2>&1", true},
+            {"dnf",     "dnf install -y {}", "rpm -q {} > /dev/null 2>&1", true},
+            {"pacman",  "pacman -S --noconfirm {}", "pacman -Q {} > /dev/null 2>&1", true},
+            {"zypper",  "zypper install -y {}", "rpm -q {} > /dev/null 2>&1", true},
+            {"apk",     "apk add {}", "apk info -e {} > /dev/null 2>&1", true},
     #endif
         };
 
@@ -152,10 +143,31 @@ namespace platform {
     }
 
     bool try_install_via_package_manager(const std::string& pkg) {
+        bool elevated = is_elevated();
+
         for (auto& mgr : available_package_managers()) {
+            if (mgr.needs_root != elevated)
+                continue;
+
             std::string cmd = mgr.install_cmd;
             if (auto pos = cmd.find("{}"); pos != std::string::npos)
-                cmd.replace(pos, 2, pkg);
+                cmd.replace(pos, 2, shell_quote(pkg));
+
+            if (std::system(cmd.c_str()) == 0)
+                return true;
+        }
+
+        return false;
+    }
+
+    bool is_installed_via_package_manager(const std::string& pkg) {
+        for (auto& mgr : available_package_managers()) {
+            if (mgr.query_cmd.empty())
+                continue;
+
+            std::string cmd = mgr.query_cmd;
+            if (auto pos = cmd.find("{}"); pos != std::string::npos)
+                cmd.replace(pos, 2, shell_quote(pkg));
 
             if (std::system(cmd.c_str()) == 0)
                 return true;
@@ -170,6 +182,85 @@ namespace platform {
         DWORD mode = 0;
         if (out != INVALID_HANDLE_VALUE && GetConsoleMode(out, &mode))
             SetConsoleMode(out, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+#endif
+    }
+
+    std::string shell_quote(const std::string& value) {
+#if defined(_WIN32)
+        std::string out = "\"";
+        for (char c : value) {
+            if (c == '"')
+                out += "\\\"";
+            else
+                out += c;
+        }
+        out += '"';
+        return out;
+#else
+        std::string out = "'";
+        for (char c : value) {
+            if (c == '\'')
+                out += "'\\''";
+            else
+                out += c;
+        }
+        out += '\'';
+        return out;
+#endif
+    }
+
+#if !defined(_WIN32)
+    static std::string unprivileged_user() {
+        const char* sudo_user = std::getenv("SUDO_USER");
+        if (!sudo_user)
+            return {};
+
+        std::string user = sudo_user;
+        if (user.empty() || user == "root")
+            return {};
+
+        if (!getpwnam(user.c_str()))
+            return {};
+
+        return user;
+    }
+#endif
+
+    bool can_drop_privileges() {
+#if defined(_WIN32)
+        return false;
+#else
+        if (::geteuid() != 0)
+            return true;
+
+        if (unprivileged_user().empty())
+            return false;
+
+        return tool_available("sudo") || tool_available("runuser") || tool_available("su");
+#endif
+    }
+
+    std::string wrap_unprivileged(const std::string& cmd) {
+#if defined(_WIN32)
+        return cmd;
+#else
+        if (::geteuid() != 0)
+            return cmd;
+
+        std::string user = unprivileged_user();
+        if (user.empty())
+            return cmd;
+
+        if (tool_available("sudo"))
+            return std::format("sudo -u {} -- sh -c {}", shell_quote(user), shell_quote(cmd));
+
+        if (tool_available("runuser"))
+            return std::format("runuser -u {} -- sh -c {}", shell_quote(user), shell_quote(cmd));
+
+        if (tool_available("su"))
+            return std::format("su {} -c {}", shell_quote(user), shell_quote(cmd));
+
+        return cmd;
 #endif
     }
 }
