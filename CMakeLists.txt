@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(simple-make LANGUAGES CXX)
+project(simple-make VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -48,7 +48,7 @@ add_executable(simple-make
 
 target_include_directories(simple-make PRIVATE include)
 
-target_compile_definitions(simple-make PRIVATE SIMPLE_MAKE_VERSION="1.0.0")
+target_compile_definitions(simple-make PRIVATE SIMPLE_MAKE_VERSION="${PROJECT_VERSION}")
 
 target_link_libraries(simple-make PRIVATE
     cpr::cpr
@@ -63,10 +63,10 @@ endif()
 install(TARGETS simple-make RUNTIME DESTINATION bin)
 
 set(CPACK_PACKAGE_NAME "simple-make")
-set(CPACK_PACKAGE_VERSION "1.0.0")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_RELEASE "1")
-set(CPACK_PACKAGE_CONTACT "ArtemyStudio")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Grab a random GitHub project, build it, and install it")
+set(CPACK_PACKAGE_CONTACT "ArtemyStudio <artemystudio.co@gmail.com>")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Install any project from source with one command")
 set(CPACK_PACKAGING_INSTALL_PREFIX "/usr/local")
 set(CPACK_GENERATOR "RPM;DEB")
 

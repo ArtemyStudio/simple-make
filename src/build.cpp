@@ -172,11 +172,6 @@ bool build_pkg(std::string path, std::size_t total_packages, std::string_view pa
             prefix += '/';
     }
 
-    // Builds and configure steps run untrusted, repo-controlled code (CMakeLists.txt,
-    // build.rs, setup.py, Makefiles, ...), so they go through wrap_unprivileged() and
-    // land in a staging dir first. Only the final copy into the prefix needs the
-    // install lock, which keeps concurrent builds actually concurrent, and only a
-    // prefix outside the user's home needs root for that copy.
     bool needs_staging = !platform::is_windows;
     std::string stage_dir = needs_staging ? std::format("{}/.simple-make/stage/{}", home, package) : "";
     std::string prefix_arg = prefix.substr(0, prefix.size() - 1);

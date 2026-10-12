@@ -103,12 +103,50 @@ namespace {
     };
 }
 
+static std::string latest_release_tag() {
+    cpr::Response r = cpr::Get(
+        cpr::Url{"https://api.github.com/repos/ArtemyStudio/simple-make/releases/latest"},
+        cpr::Header{{"User-Agent", "simple-make"}},
+        cpr::Timeout{4000});
+
+    if (r.status_code != 200)
+        return {};
+
+    auto data = nlohmann::json::parse(r.text, nullptr, false);
+    if (data.is_discarded())
+        return {};
+
+    std::string tag = data.value("tag_name", std::string{});
+    if (!tag.empty() && tag.front() == 'v')
+        tag.erase(0, 1);
+
+    return tag;
+}
+
 int main(int argc, char* argv[]) {
     platform::enable_ansi_colors();
 
     auto args = std::span(argv, argc).subspan(1);
     if (args.empty()) {
-        std::println("usage: simple-make <package-name> [package-name...]\n");
+        std::println("usage: simple-make <package-name> [package-name...]");
+        std::println("       simple-make --help\n");
+        return 1;
+    }
+
+    std::string_view cmd0 = args[0];
+
+    if (cmd0 == "--version" || cmd0 == "-V") {
+        std::println("simple-make {}", SIMPLE_MAKE_VERSION);
+        return 0;
+    }
+
+    static constexpr std::string_view known_flags[] = {
+        "--help", "-h", "--version", "-V", "--search", "-s", "--remove", "-r",
+        "--delete", "-d", "--update", "-u", "--self-update", "--setup-config"
+    };
+
+    if (cmd0.starts_with('-') && std::ranges::find(known_flags, cmd0) == std::ranges::end(known_flags)) {
+        std::println("\x1b[31m(failed) [unknown option] {} -> run simple-make --help\x1b[0m", cmd0);
         return 1;
     }
 
@@ -116,7 +154,6 @@ int main(int argc, char* argv[]) {
 
     home = config.home_path.empty() ? platform::resolve_home_dir() : config.home_path;
 
-    std::string_view cmd0 = args[0];
     bool needs_install_rights = cmd0 != "--help" && cmd0 != "-h" && cmd0 != "-s" && cmd0 != "--search" &&
                                  cmd0 != "--setup-config" && cmd0 != "--remove" && cmd0 != "-r" &&
                                  cmd0 != "--delete" && cmd0 != "-d";
@@ -131,8 +168,14 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    if (config.auto_update_check && cmd0 != "--self-update" && cmd0 != "--help" && cmd0 != "-h") {
+        std::string latest = latest_release_tag();
+        if (!latest.empty() && latest != SIMPLE_MAKE_VERSION)
+            std::println("(note) simple-make {} is out (you have {}) -> run simple-make --self-update", latest, SIMPLE_MAKE_VERSION);
+    }
+
     if (std::string_view(args[0]) == "--help" || std::string_view(args[0]) == "-h") {
-        std::println("\nsimple-make — modern package downloader & builder (C++23)\n");
+        std::println("\nsimple-make {} — modern package downloader & builder (C++23)\n", SIMPLE_MAKE_VERSION);
 
         print_box("usage:", {
             "simple-make <package-name>         search, download and build a package by name",
@@ -142,6 +185,7 @@ int main(int argc, char* argv[]) {
 
         print_box("options:", {
             "-h, --help                    print this help and exit",
+            "-V, --version                 print the version and exit",
             "-r, --remove, --delete, -d    remove installed packages",
             "-s, --search                  search for a package across all configured sources",
             "-u, --update [package...]     rebuild installed packages (all of them, if none given)",
@@ -479,19 +523,14 @@ int main(int argc, char* argv[]) {
 
         return 0;
     } else if (std::string_view(args[0]) == "--self-update") {
-        cpr::Response r = cpr::Get(cpr::Url{"https://api.github.com/repos/ArtemyStudio/simple-make/releases/latest"}, cpr::Header{{"User-Agent", "simple-make"}});
+        std::string latest = latest_release_tag();
 
-        if (r.status_code != 200) {
+        if (latest.empty()) {
             std::println("\x1b[31m(failed) [cannot check for updates]\x1b[0m");
             return 1;
         }
 
-        auto data = nlohmann::json::parse(r.text, nullptr, false);
-        std::string latest = data.is_discarded() ? "" : data.value("tag_name", std::string{});
-        if (!latest.empty() && latest.front() == 'v')
-            latest.erase(0, 1);
-
-        if (latest.empty() || latest == SIMPLE_MAKE_VERSION) {
+        if (latest == SIMPLE_MAKE_VERSION) {
             std::println("simple-make is already up to date (v{})", SIMPLE_MAKE_VERSION);
             return 0;
         }
@@ -581,9 +620,6 @@ bool clone_repo_via_git(std::string_view url, std::string_view package) {
 }
 
 std::string get_filename_from_url(std::string_view url) {
-    // Release and archive URLs end in the tag or asset name, not the project name
-    // (".../octobanana/peaclock/archive/refs/tags/0.4.3.tar.gz"), so prefer the
-    // repository segment that comes before them.
     for (std::string_view marker : {"/archive/", "/releases/download/"}) {
         size_t marker_pos = url.find(marker);
         if (marker_pos == std::string_view::npos)
