@@ -15,6 +15,9 @@
 #include <cstddef>
 #include <vector>
 #include <cctype>
+#include <format>
+#include <set>
+#include <string_view>
 
 namespace fs = std::filesystem;
 

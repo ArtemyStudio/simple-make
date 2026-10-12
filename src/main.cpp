@@ -24,6 +24,8 @@
 #include <mutex>
 #include <semaphore>
 #include <sstream>
+#include <string_view>
+#include <span>
 
 namespace fs = std::filesystem;
 

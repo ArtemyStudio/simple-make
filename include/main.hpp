@@ -6,6 +6,12 @@
 #include <cstddef>
 #include <print>
 #include <utility>
+#include <format>
+#include <string_view>
+
+#ifndef SIMPLE_MAKE_VERSION
+#define SIMPLE_MAKE_VERSION "0.0.0-dev"
+#endif
 
 extern std::string home;
 

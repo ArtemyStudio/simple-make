@@ -2,6 +2,7 @@
 
 #include <string>
 #include <cstddef>
+#include <string_view>
 
 enum class Builders {
     Cmake,

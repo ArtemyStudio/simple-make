@@ -5,6 +5,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <string_view>
 
 std::string get_fast_link(std::string_view pkg) {
   static std::pmr::unordered_map<std::string_view, std::string_view> popular = {

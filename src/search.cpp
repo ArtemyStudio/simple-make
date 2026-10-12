@@ -9,6 +9,8 @@
 #include <cctype>
 #include <format>
 #include <string>
+#include <string_view>
+#include <optional>
 
 namespace {
 
