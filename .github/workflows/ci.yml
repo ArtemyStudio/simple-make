@@ -48,7 +48,7 @@ jobs:
         run: ./build/simple-make --help
 
       - name: Upload binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: simple-make-${{ matrix.name }}
           path: build/simple-make
@@ -76,7 +76,7 @@ jobs:
         run: cd build && cpack -G "DEB;RPM"
 
       - name: Upload packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: simple-make-packages
           path: |
