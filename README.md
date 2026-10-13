@@ -79,6 +79,16 @@ Resolving, downloading, and *building* a package never needs root, on any platfo
 
 With the default prefix (`~/.local`), that step doesn't need root either, so the whole pipeline runs as you end to end. Point `install_prefix` at something system-wide (`/usr/local`, `/opt`, ...) and simple-make builds into a staging directory as you, then uses a single elevated copy to place the result — root never touches the build.
 
+## Upgrading from root-run installs
+
+If you used simple-make through `sudo` before, `~/.simple-make` is owned by root and a normal-user run will say `cannot write to ~/.simple-make`. Fix it once:
+
+```bash
+sudo chown -R "$(id -un)": ~/.simple-make
+```
+
+Packages recorded before the `.url` source file existed are re-resolved by name on `-u`.
+
 ## Platform notes
 
 - **Linux/BSD**: run with `sudo` if you've pointed `install_prefix` outside your home; not needed for the default.

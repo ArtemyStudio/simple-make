@@ -30,6 +30,7 @@ namespace platform {
     bool is_elevated();
     std::string default_install_prefix();
     void fix_ownership(const std::string& path);
+    bool is_writable(const std::string& path);
 
     struct PackageManager {
         std::string name;

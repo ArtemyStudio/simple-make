@@ -106,6 +106,15 @@ namespace platform {
     #endif
     }
 
+    bool is_writable(const std::string& path) {
+    #if defined(_WIN32)
+        (void)path;
+        return true;
+    #else
+        return ::access(path.c_str(), W_OK) == 0;
+    #endif
+    }
+
     bool tool_available(const std::string& tool) {
     #if defined(_WIN32)
         std::string cmd = std::format("where {} >nul 2>&1", shell_quote(tool));

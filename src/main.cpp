@@ -568,39 +568,55 @@ int main(int argc, char* argv[]) {
 }
 
 bool prepare_paths(std::string_view package) {
-    try {
-        if (home.empty()) {
-            locked_println("\x1b[31mhome path is not found!\x1b[0m");
-            return false;
+    if (home.empty()) {
+        locked_println("\x1b[31mhome path is not found!\x1b[0m");
+        return false;
+    }
+
+    std::string root = home + "/.simple-make";
+    static std::once_flag hint_flag;
+
+    auto fail = [&](const std::string& path, const std::string& reason) {
+        locked_println("\x1b[31m(failed) [cannot write to {}: {}] package: {}\x1b[0m", path, reason, package);
+
+        if (!platform::is_windows) {
+            std::call_once(hint_flag, [&] {
+                locked_println("    this usually means an earlier run as root created it. fix it once with:");
+                locked_println("    sudo chown -R \"$(id -un)\": {}", platform::shell_quote(root));
+            });
         }
 
-        if (!fs::exists(home + "/.simple-make")) {
-            fs::create_directory(home + "/.simple-make");
-            fs::create_directory(home + "/.simple-make/sources");
-            fs::create_directory(home + "/.simple-make/installed");
-            fs::create_directory(home + "/.simple-make/logs");
-        } else {
-            if (!fs::exists(home + "/.simple-make/sources")) 
-                fs::create_directory(home +"/.simple-make/sources");
-            if (!fs::exists(home + "/.simple-make/logs")) 
-                fs::create_directory(home +"/.simple-make/logs");
-            if (!fs::exists(home + "/.simple-make/installed"))
-                fs::create_directory(home +"/.simple-make/installed");
-        }
-        std::string pkg_path = std::format("{}/.simple-make/sources/{}", home, package);
-        if (!fs::exists(pkg_path)) {
-            fs::create_directory(pkg_path);
-        } else {
-            fs::remove_all(pkg_path);
-            fs::create_directory(pkg_path);
-        }
-    } catch (...) { return false; }
+        return false;
+    };
 
-    platform::fix_ownership(std::format("{}/.simple-make", home));
-    platform::fix_ownership(std::format("{}/.simple-make/sources", home));
-    platform::fix_ownership(std::format("{}/.simple-make/installed", home));
-    platform::fix_ownership(std::format("{}/.simple-make/logs", home));
-    platform::fix_ownership(std::format("{}/.simple-make/sources/{}", home, package));
+    std::error_code ec;
+
+    for (const char* sub : {"", "/sources", "/installed", "/logs"}) {
+        std::string dir = root + sub;
+
+        fs::create_directories(dir, ec);
+        if (ec)
+            return fail(dir, ec.message());
+
+        if (!platform::is_writable(dir))
+            return fail(dir, "permission denied");
+    }
+
+    std::string pkg_path = std::format("{}/sources/{}", root, package);
+
+    fs::remove_all(pkg_path, ec);
+    if (ec)
+        return fail(pkg_path, ec.message());
+
+    fs::create_directories(pkg_path, ec);
+    if (ec)
+        return fail(pkg_path, ec.message());
+
+    platform::fix_ownership(root);
+    platform::fix_ownership(root + "/sources");
+    platform::fix_ownership(root + "/installed");
+    platform::fix_ownership(root + "/logs");
+    platform::fix_ownership(pkg_path);
 
     return true;
 }
@@ -828,10 +844,8 @@ void process_package(std::string_view pkg, std::size_t total_packages, bool is_u
         return;
     }
 
-    if (!prepare_paths(pkg_name)) {
-        locked_println("\x1b[31m(failed) [cannot create paths] package: {}\x1b[0m", pkg_name);
+    if (!prepare_paths(pkg_name))
         return;
-    }
 
     bool fetch_success = true;
 
